@@ -53,9 +53,10 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
+void MX_ETH_Init(void);
 
 /* USER CODE BEGIN EFP */
-
+void MX_ETH_Init(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
@@ -67,10 +68,10 @@ void Error_Handler(void);
 #define A2_PLS_GPIO_Port GPIOC
 #define A2_DIR_Pin GPIO_PIN_8
 #define A2_DIR_GPIO_Port GPIOC
-#define A1_DIR_Pin GPIO_PIN_9
-#define A1_DIR_GPIO_Port GPIOC
 #define A1_PLS_Pin GPIO_PIN_8
 #define A1_PLS_GPIO_Port GPIOA
+#define A1_DIR_Pin GPIO_PIN_10
+#define A1_DIR_GPIO_Port GPIOC
 
 /* USER CODE BEGIN Private defines */
 

@@ -22,7 +22,16 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "lwip.h"
+#include "ethernetif.h"
+#include "lwip/opt.h"
+#include "lwip/init.h"
+#include "netif/etharp.h"
+#include "lwip/netif.h"
+#include "lwip/timeouts.h"
+#if LWIP_DHCP
+#include "lwip/dhcp.h"
+#endif
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,22 +63,29 @@ TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim8;
 
 /* USER CODE BEGIN PV */
-
+extern struct netif gnetif;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_ETH_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM8_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
-
+static void Netif_Config(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+int _write(int file, char *ptr, int len)
+{
+	/* Implement your write code here, this is used by puts and printf for example */
+	int i=0;
+	for(i=0 ; i<len ; i++)
+	ITM_SendChar((*ptr++));
+	return len;
+}
 
 /* USER CODE END 0 */
 
@@ -102,18 +118,29 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_ETH_Init();
   MX_TIM1_Init();
   MX_TIM8_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-
+  MX_ETH_Init();
+  lwip_init();
+  Netif_Config();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
+  while (1) {
+        /* Read a received packet from the Ethernet buffers and send it
+        to the lwIP for handling */
+        ethernetif_input(&gnetif);
+        /* Handle timeouts */
+        sys_check_timeouts();
+		#if LWIP_NETIF_LINK_CALLBACK
+        Ethernet_Link_Periodic_Handle(&gnetif);
+		#endif
+		#if LWIP_DHCP
+        DHCP_Periodic_Handle(&gnetif);
+		#endif
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -139,7 +166,9 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_CSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSE
+                              |RCC_OSCILLATORTYPE_CSI;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSIDiv = RCC_HSI_DIV2;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
@@ -175,6 +204,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+  HAL_RCC_MCOConfig(RCC_MCO2, RCC_MCO2SOURCE_HSE, RCC_MCODIV_1);
 
   /** Configure the programming delay
   */
@@ -186,7 +216,7 @@ void SystemClock_Config(void)
   * @param None
   * @retval None
   */
-static void MX_ETH_Init(void)
+void MX_ETH_Init(void)
 {
 
   /* USER CODE BEGIN ETH_Init 0 */
@@ -463,12 +493,27 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : A2_DIR_Pin A1_DIR_Pin */
-  GPIO_InitStruct.Pin = A2_DIR_Pin|A1_DIR_Pin;
+  /*Configure GPIO pin : A2_DIR_Pin */
+  GPIO_InitStruct.Pin = A2_DIR_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(A2_DIR_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PC9 */
+  GPIO_InitStruct.Pin = GPIO_PIN_9;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF0_MCO;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : A1_DIR_Pin */
+  GPIO_InitStruct.Pin = A1_DIR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(A1_DIR_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -476,7 +521,36 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+/**
+ * @brief  Setup the network interface
+ *   None
+ * @retval None
+ */
+static void Netif_Config(void) {
+      ip_addr_t ipaddr;
+      ip_addr_t netmask;
+      ip_addr_t gw;
+#if LWIP_DHCP
+      ip_addr_set_zero_ip4(&ipaddr);
+      ip_addr_set_zero_ip4(&netmask);
+      ip_addr_set_zero_ip4(&gw);
+#else
+  /* IP address default setting */
+  IP4_ADDR(&ipaddr, IP_ADDR0, IP_ADDR1, IP_ADDR2, IP_ADDR3);
+  IP4_ADDR(&netmask, NETMASK_ADDR0, NETMASK_ADDR1 , NETMASK_ADDR2, NETMASK_ADDR3);
+  IP4_ADDR(&gw, GW_ADDR0, GW_ADDR1, GW_ADDR2, GW_ADDR3);
+#endif
+      /* add the network interface */
+      netif_add(&gnetif, &ipaddr, &netmask, &gw, NULL, &ethernetif_init,
+                   &ethernet_input);
+      /*  Registers the default network interface */
+      netif_set_default(&gnetif);
+#if LWIP_NETIF_LINK_CALLBACK
+      netif_set_link_callback(&gnetif, ethernet_link_status_updated);
+      dhcp_start(&gnetif);
+      ethernet_link_status_updated(&gnetif);
+#endif
+}
 /* USER CODE END 4 */
 
 /**
